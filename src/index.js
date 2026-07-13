@@ -2,7 +2,7 @@ require('dotenv').config();
 
 // connect to MongoDB database
 require('../src/config/config.database');
-
+// const connectDB = require('../src/config/config.database');
 const express = require('express');
 const http = require('http');
 // const socketHandler = require('./config/socket');
@@ -74,5 +74,19 @@ server.listen(PORT, (err) => {
         console.log(`Server is live at localhost:${PORT}`)
     }
 });
+
+// const startServer = async () => {
+//   try {
+//     await connectDB();
+
+//     server.listen(PORT, () => {
+//       console.log(`Server is live at localhost:${PORT}`);
+//     });
+//   } catch (err) {
+//     console.error(err);
+//   }
+// };
+
+// startServer();
 
 module.exports = app;

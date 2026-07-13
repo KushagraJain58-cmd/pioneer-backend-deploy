@@ -227,6 +227,36 @@ class StudentController {
         }
     }
 
+    static async getSelfProfile(req, res) {
+        try {
+            const result = await StudentService.getSelfProfile(req);
+            const { status, error, message, data } = result;
+            return res.json({ error, status, message, data });
+        } catch (error) {
+            res.status(400).json(Responses.errorResponse(error));
+        }
+    }
+
+    static async updateSelfProfile(req, res) {
+        try {
+            const result = await StudentService.updateSelfProfile(req);
+            const { status, error, message, data } = result;
+            return res.json({ error, status, message, data });
+        } catch (error) {
+            res.status(400).json(Responses.errorResponse(error));
+        }
+    }
+
+    static async changeOwnPassword(req, res) {
+        try {
+            const result = await StudentService.changeOwnPassword(req);
+            const { status, error, message, data } = result;
+            return res.json({ error, status, message, data });
+        } catch (error) {
+            res.status(400).json(Responses.errorResponse(error));
+        }
+    }
+
 }
 
 module.exports = StudentController;

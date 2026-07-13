@@ -610,8 +610,9 @@ class StudentService {
     if (!student) {
       throw NotFound("Student not found");
     }
-
+    console.log("student.pass",student?.studentPassword)
     student.studentPassword = EncryptAndDecrypt.decrypt(student?.studentPassword)
+    console.log("student.pass after",student?.studentPassword)
 
     /* ----------------------------------
       3. RESPONSE
@@ -1105,6 +1106,113 @@ class StudentService {
 }
 
 
+  static async getSelfProfile(req) {
+    try {
+      const { user } = req.authData;
+
+      const student = await Student.findById(user._id).select("-studentPassword");
+      if (!student) {
+        throw new Error("Student not found");
+      }
+
+      return {
+        status: true,
+        data: student,
+        message: "Profile fetched successfully",
+        error: null,
+      };
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message || "Unable to fetch profile",
+        error,
+      };
+    }
+  }
+
+  static async updateSelfProfile(req) {
+    try {
+      const { user } = req.authData;
+      const { personalInfo, addressInfo, contactInfo, familyInfo } = req.body;
+
+      const updated = await Student.findByIdAndUpdate(
+        user._id,
+        {
+          $set: {
+            ...(personalInfo && { personalInfo }),
+            ...(addressInfo && { addressInfo }),
+            ...(contactInfo && { contactInfo }),
+            ...(familyInfo && { familyInfo }),
+          },
+        },
+        { new: true, runValidators: true }
+      ).select("-studentPassword");
+
+      if (!updated) {
+        throw new Error("Student not found");
+      }
+
+      return {
+        status: true,
+        data: updated,
+        message: "Profile updated successfully",
+        error: null,
+      };
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message || "Unable to update profile",
+        error,
+      };
+    }
+  }
+
+  static async changeOwnPassword(req) {
+    try {
+      const { user } = req.authData;
+      const { currentPassword, newPassword } = req.body;
+
+      if (!newPassword || newPassword.length < 6) {
+        throw new Error("New password must be at least 6 characters");
+      }
+
+      const student = await Student.findById(user._id);
+      if (!student) {
+        throw new Error("Student not found");
+      }
+
+      if (currentPassword) {
+        const decrypted = EncryptAndDecrypt.decrypt(student.studentPassword);
+        if (decrypted !== currentPassword) {
+          throw new Error("Current password is incorrect");
+        }
+      }
+
+      const encryptedPassword = EncryptAndDecrypt.encrypt(newPassword);
+      const saltRounds = parseInt(process.env.BCRYPT_SALT) || 10;
+      const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+      await Student.findByIdAndUpdate(user._id, {
+        $set: { studentPassword: encryptedPassword }
+      });
+
+      return {
+        status: true,
+        data: null,
+        message: "Password changed successfully",
+        error: null,
+      };
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message || "Unable to change password",
+        error,
+      };
+    }
+  }
 
 }
 

@@ -18,6 +18,10 @@ router.post('/',verifyToken,StudentController.studentCreate);
 
 router.get('/',verifyToken,StudentController.getStudents);
 
+router.get('/profile/me',verifyToken,StudentController.getSelfProfile);
+router.put('/profile/me',verifyToken,StudentController.updateSelfProfile);
+router.put('/profile/me/password',verifyToken,StudentController.changeOwnPassword);
+
 router.get('/:studentId',verifyToken,StudentController.getStudentDetails);
 
 router.post('/uploadSheet',verifyToken,upload.single('csvFile'),StudentController.uploadStudentsSheet);
