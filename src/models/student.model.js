@@ -16,6 +16,15 @@ const StudentSchema = new mongoose.Schema(
       required: true
     },
     studentPassword: {type: String},
+
+    // Which portals this student may log into.
+    // "main" = Pioneer student app/web, "neet" = Pioneer NEET (DISHA C10/C12) app.
+    portalAccess: {
+      type: [String],
+      enum: ["main", "neet"],
+      default: ["main"]
+    },
+
     // Basic Information
     personalInfo: {
       fullName: { type: String, required: true },

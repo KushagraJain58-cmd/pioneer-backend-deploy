@@ -159,15 +159,6 @@ class StudentController {
             return res.status(400).json(Responses.errorResponse(errors));
             }
 
-            if (req.body.password) {
-            const encryptedPassword = EncryptAndDecrypt.encrypt(req.body.password);
-            const salt = bcrypt.genSaltSync(parseInt(process.env.BCRYPT_SALT));
-            const hash = bcrypt.hashSync(req.body.password, salt);
-
-            req.body.password = hash;
-            req.body.clientPassword = encryptedPassword;
-            }
-
             const result = await StudentService.updateStudent(req);
 
             const { status, error, message, data, currentPage, totalPages } = result;

@@ -22,6 +22,29 @@ const FIXED_COLUMNS = [
   "Exam Type"
 ];
 
+/**
+ * Normalise a portal-access input into an array of valid portals.
+ * Accepts:
+ *   - an array like ["main"], ["neet"], ["main","neet"]
+ *   - a string "main" | "neet" | "both" | "main,neet"
+ * Falls back to ["main"] when empty/invalid.
+ */
+function normalizePortalAccess(input) {
+  const VALID = ["main", "neet"];
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === "string" && input.trim()) {
+    const v = input.trim().toLowerCase();
+    if (v === "both") list = ["main", "neet"];
+    else list = v.split(/[,|]/);
+  }
+  const cleaned = [
+    ...new Set(list.map((p) => String(p).trim().toLowerCase()).filter((p) => VALID.includes(p)))
+  ];
+  return cleaned.length ? cleaned : ["main"];
+}
+
 class StudentService {
 //   static async createStudent(payload) {
 //     try {
@@ -162,6 +185,26 @@ class StudentService {
           //     throw Unauthorized("This account is suspended.");
           // }
 
+          /* ----------------------------------
+             PORTAL ACCESS CHECK
+             Each frontend sends `portal` ("main" | "neet"). A student may only
+             log into a portal they've been granted access to. Existing students
+             without the field default to "main" only.
+          -----------------------------------*/
+          const requestedPortal = req.body.portal;
+          if (requestedPortal) {
+              const access = Array.isArray(clientUser.portalAccess) && clientUser.portalAccess.length
+                  ? clientUser.portalAccess
+                  : ["main"];
+              if (!access.includes(requestedPortal)) {
+                  throw Forbidden(
+                      requestedPortal === "neet"
+                          ? "You do not have access to the Pioneer NEET portal. Please contact your school."
+                          : "You do not have access to this portal. Please contact your school."
+                  );
+              }
+          }
+
           let isverified = false;
           if (phone) {
               isverified = true;
@@ -250,12 +293,15 @@ class StudentService {
         academicInfo,
         addressInfo,
         contactInfo,
-        familyInfo
+        familyInfo,
+        portalAccess
       } = payload.body;
 
       if (!academicInfo?.classGrade) {
         throw Forbidden("Class is required");
       }
+
+      const normalizedPortalAccess = normalizePortalAccess(portalAccess);
 
       /* ----------------------------------
       1. GENERATE STUDENT ID
@@ -291,6 +337,7 @@ class StudentService {
         studentId,
         schoolId,
         studentPassword: encryptedPassword,
+        portalAccess: normalizedPortalAccess,
         personalInfo,
         academicInfo,
         addressInfo,
@@ -373,6 +420,10 @@ class StudentService {
       const studentsToInsert = [];
       const credentials = []; // optional: return passwords once
 
+      // Batch-level portal access (from the upload form) — applied to every row
+      // unless a row overrides it with a "Portal Access" column.
+      const batchPortalAccess = normalizePortalAccess(req.body?.portalAccess);
+
       let index = 1;
 
       for (const row of rows) {
@@ -405,6 +456,9 @@ class StudentService {
           studentId,
           schoolId,
           studentPassword:encryptedPassword,
+          portalAccess: row["Portal Access"]
+            ? normalizePortalAccess(row["Portal Access"])
+            : batchPortalAccess,
           personalInfo: {
             fullName: row["Full Name"],
             dateOfBirth: row["Date of Birth"]
@@ -610,9 +664,16 @@ class StudentService {
     if (!student) {
       throw NotFound("Student not found");
     }
-    console.log("student.pass",student?.studentPassword)
-    student.studentPassword = EncryptAndDecrypt.decrypt(student?.studentPassword)
-    console.log("student.pass after",student?.studentPassword)
+    console.log("student",student)
+    try {
+      student.studentPassword = student.studentPassword
+        ? EncryptAndDecrypt.decrypt(student.studentPassword)
+        : "";
+    } catch (e) {
+      student.studentPassword = "";
+    }
+
+    console.log("student UPdated",student)
 
     /* ----------------------------------
       3. RESPONSE
@@ -634,6 +695,94 @@ class StudentService {
     };
   }
 }
+
+  static async updateStudent(payload) {
+    try {
+      const { user } = payload.authData;
+      const { studentId } = payload.params;
+
+      /* ----------------------------------
+        1. AUTHORIZATION
+      -----------------------------------*/
+      if (user.role !== "SCHOOL_ADMIN") {
+        throw Forbidden("You are not allowed to update students");
+      }
+
+      const schoolId = new mongoose.Types.ObjectId(user.schoolId);
+      if (!schoolId) {
+        throw Forbidden("School context missing");
+      }
+
+      /* ----------------------------------
+        2. FIND STUDENT (SECURE)
+      -----------------------------------*/
+      const student = await Student.findOne({ studentId, schoolId });
+      if (!student) {
+        throw Forbidden("Student not found");
+      }
+
+      /* ----------------------------------
+        3. APPLY UPDATES (merge, not replace)
+      -----------------------------------*/
+      const {
+        personalInfo,
+        academicInfo,
+        addressInfo,
+        contactInfo,
+        familyInfo,
+        portalAccess,
+        password
+      } = payload.body;
+
+      if (personalInfo) {
+        student.personalInfo = { ...student.personalInfo?.toObject?.(), ...personalInfo };
+      }
+      if (academicInfo) {
+        student.academicInfo = { ...student.academicInfo?.toObject?.(), ...academicInfo };
+      }
+      if (addressInfo) {
+        student.addressInfo = { ...student.addressInfo?.toObject?.(), ...addressInfo };
+      }
+      if (contactInfo) {
+        student.contactInfo = { ...student.contactInfo?.toObject?.(), ...contactInfo };
+      }
+      if (familyInfo) {
+        student.familyInfo = { ...student.familyInfo?.toObject?.(), ...familyInfo };
+      }
+      if (portalAccess) {
+        student.portalAccess = normalizePortalAccess(portalAccess);
+      }
+      if (password) {
+        if (String(password).length < 6) {
+          throw Forbidden("Password must be at least 6 characters");
+        }
+        student.studentPassword = EncryptAndDecrypt.encrypt(String(password));
+      }
+
+      await student.save();
+
+      /* ----------------------------------
+        4. RESPONSE (decrypt so the admin UI can show it right away)
+      -----------------------------------*/
+      const response = student.toObject();
+      response.studentPassword = password ? String(password) : EncryptAndDecrypt.decrypt(student.studentPassword);
+
+      return {
+        status: true,
+        data: response,
+        message: "Student updated successfully",
+        error: null
+      };
+
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message || "Unable to update student",
+        error
+      };
+    }
+  }
 
 
   // static async uploadMarks(req) {

@@ -23,6 +23,7 @@ router.put('/profile/me',verifyToken,StudentController.updateSelfProfile);
 router.put('/profile/me/password',verifyToken,StudentController.changeOwnPassword);
 
 router.get('/:studentId',verifyToken,StudentController.getStudentDetails);
+router.put('/:studentId',verifyToken,StudentController.updateStudent);
 
 router.post('/uploadSheet',verifyToken,upload.single('csvFile'),StudentController.uploadStudentsSheet);
 
