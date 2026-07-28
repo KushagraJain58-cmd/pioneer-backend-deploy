@@ -68,5 +68,14 @@ router.get('/disha8Questions',verifyToken,PsychometricController.getDisha8Questi
 router.post('/disha8Assessment',verifyToken,PsychometricController.submitDisha8Assessment);
 router.get('/disha8Result/:id',verifyToken,PsychometricController.getDisha8Result);
 
+/* ------------------------------------------------------------------
+   ADMIN — psychometric reporting for the admin/school dashboard.
+   Students who have taken at least one test, their test list, and the
+   full result + responses for any single test.
+   ------------------------------------------------------------------ */
+router.get('/admin/students',verifyToken,PsychometricController.getPsychometricStudents);
+router.get('/admin/students/:studentId',verifyToken,PsychometricController.getPsychometricStudentSummary);
+router.get('/admin/students/:studentId/tests/:testKey',verifyToken,PsychometricController.getPsychometricStudentTestReport);
+
 
 module.exports = router;

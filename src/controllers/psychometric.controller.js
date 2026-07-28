@@ -1,5 +1,6 @@
 const Responses = require("../utils/utils.response");
 const PsychometricService = require("../services/psychometric.service")
+const PsychometricAdminService = require("../services/psychometricAdmin.service")
 
 
 class PsychometricController {
@@ -626,6 +627,54 @@ class PsychometricController {
             }
         } catch (error) {
             res.status(401).json(Responses.errorResponse(error));
+        }
+    }
+
+    /* ==================================================================
+       ADMIN — psychometric reporting across all students and all tests.
+       Consumed by the pioneer-admin dashboard. School users are scoped to
+       their own school; platform admins see every student.
+       ================================================================== */
+
+    static async getPsychometricStudents(req, res) {
+        try {
+            const result = await PsychometricAdminService.getStudentsWithAssessments(req);
+            const { status, error, message, data } = result;
+            if (status) {
+                res.status(200).json(Responses.successResponse(message, data));
+            } else {
+                res.status(error.status || 400).json(Responses.errorResponse(error));
+            }
+        } catch (error) {
+            res.status(500).json(Responses.errorResponse(error));
+        }
+    }
+
+    static async getPsychometricStudentSummary(req, res) {
+        try {
+            const result = await PsychometricAdminService.getStudentAssessmentSummary(req);
+            const { status, error, message, data } = result;
+            if (status) {
+                res.status(200).json(Responses.successResponse(message, data));
+            } else {
+                res.status(error.status || 400).json(Responses.errorResponse(error));
+            }
+        } catch (error) {
+            res.status(500).json(Responses.errorResponse(error));
+        }
+    }
+
+    static async getPsychometricStudentTestReport(req, res) {
+        try {
+            const result = await PsychometricAdminService.getStudentTestReport(req);
+            const { status, error, message, data } = result;
+            if (status) {
+                res.status(200).json(Responses.successResponse(message, data));
+            } else {
+                res.status(error.status || 400).json(Responses.errorResponse(error));
+            }
+        } catch (error) {
+            res.status(500).json(Responses.errorResponse(error));
         }
     }
 
