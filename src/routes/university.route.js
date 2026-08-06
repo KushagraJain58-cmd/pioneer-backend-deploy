@@ -5,5 +5,7 @@ const router = express.Router();
 
 router.post('/',verifyToken,UniversityController.createUniversity);
 router.get('/',verifyToken,UniversityController.getUniversity);
+router.put('/:id',verifyToken,UniversityController.updateUniversity);
+router.delete('/:id',verifyToken,UniversityController.deleteUniversity);
 
 module.exports = router;

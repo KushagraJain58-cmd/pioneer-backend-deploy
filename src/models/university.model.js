@@ -143,6 +143,11 @@ const UniversitySchema = new mongoose.Schema(
       ref: "User"
     },
 
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+
     isDeleted: { type: Boolean, default: false, index: true }
   },
   { timestamps: true }

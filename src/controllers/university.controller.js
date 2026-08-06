@@ -43,6 +43,38 @@ class UniversityController {
             res.status(401).json(Responses.errorResponse(error))
         }
     }
+    static async updateUniversity(req, res) {
+        try {
+            const result = await UniversityService.updateUniversity(req);
+            const {
+                status, error, message, data
+            } = result;
+            if (status) {
+                res.status(200).json(Responses.successResponse(message, data));
+            } else {
+                res.status(error.status || 401).json(Responses.errorResponse(error));
+            }
+        }
+        catch (error) {
+            res.status(401).json(Responses.errorResponse(error))
+        }
+    }
+    static async deleteUniversity(req, res) {
+        try {
+            const result = await UniversityService.deleteUniversity(req);
+            const {
+                status, error, message, data
+            } = result;
+            if (status) {
+                res.status(200).json(Responses.successResponse(message, data));
+            } else {
+                res.status(error.status || 401).json(Responses.errorResponse(error));
+            }
+        }
+        catch (error) {
+            res.status(401).json(Responses.errorResponse(error))
+        }
+    }
 }
 
 module.exports = UniversityController;

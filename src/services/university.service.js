@@ -1,4 +1,5 @@
-const { Forbidden } = require("http-errors");
+const { Forbidden, NotFound } = require("http-errors");
+const mongoose = require("mongoose");
 const University = require("../models/university.model");
 
 class UniversityService {
@@ -111,6 +112,115 @@ class UniversityService {
         total,
         currentPage: Number(page),
         totalPages: Math.ceil(total / Number(limit)) || 1
+      };
+
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message,
+        error
+      };
+    }
+  }
+
+  /* ================================
+     UPDATE UNIVERSITY
+  =================================*/
+  static async updateUniversity(payload) {
+    try {
+      const { user } = payload.authData;
+
+      /* 1. AUTH */
+      if (user.role !== "superadmin") {
+        throw Forbidden("You are not allowed to update universities");
+      }
+
+      const { id } = payload.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw Forbidden("Invalid university id");
+      }
+
+      const university = await University.findOne({ _id: id, isDeleted: false });
+      if (!university) throw NotFound("University not found");
+
+      /* 2. EXTRACT BODY */
+      const {
+        name,
+        city,
+        state,
+        rankAccreditation,
+        modeOfEntry,
+        acceptanceRate,
+        cutOffTrend,
+        entranceExams,
+        officialWebsite
+      } = payload.body;
+
+      if (!name) throw Forbidden("University name is required");
+
+      /* 3. UPDATE */
+      university.set({
+        name,
+        city,
+        state,
+        rankAccreditation,
+        modeOfEntry,
+        acceptanceRate,
+        cutOffTrend,
+        entranceExams: entranceExams || [],
+        officialWebsite,
+        updatedBy: user._id
+      });
+
+      await university.save();
+
+      return {
+        status: true,
+        data: university.toObject(),
+        message: "University updated successfully",
+        error: null
+      };
+
+    } catch (error) {
+      return {
+        status: false,
+        data: null,
+        message: error.message,
+        error
+      };
+    }
+  }
+
+  /* ================================
+     DELETE UNIVERSITY (soft)
+  =================================*/
+  static async deleteUniversity(payload) {
+    try {
+      const { user } = payload.authData;
+
+      if (user.role !== "superadmin") {
+        throw Forbidden("You are not allowed to delete universities");
+      }
+
+      const { id } = payload.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw Forbidden("Invalid university id");
+      }
+
+      const university = await University.findOneAndUpdate(
+        { _id: id, isDeleted: false },
+        { isDeleted: true, updatedBy: user._id },
+        { new: true }
+      );
+
+      if (!university) throw NotFound("University not found");
+
+      return {
+        status: true,
+        data: { _id: university._id },
+        message: "University deleted successfully",
+        error: null
       };
 
     } catch (error) {
