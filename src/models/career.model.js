@@ -43,6 +43,15 @@ const CareerSchema = new mongoose.Schema(
       index: true
     },
 
+    /* Link to the Industry collection. `industry` above is the
+       denormalised name, kept in sync for older clients. */
+    industryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Industry",
+      default: null,
+      index: true
+    },
+
     description: {
       type: String,
       required: true,

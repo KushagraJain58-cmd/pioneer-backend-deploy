@@ -1,7 +1,11 @@
-const { Forbidden, InternalServerError, Unauthorized, NotFound } = require("http-errors");
+const { Forbidden, NotFound } = require("http-errors");
 const mongoose = require("mongoose");
-const Career = require("../models/career.model")
-const Industry = require("../models/industry.model")
+const Career = require("../models/career.model");
+const Industry = require("../models/industry.model");
+
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 class CareerService {
 
@@ -13,169 +17,8 @@ class CareerService {
             1. AUTHORIZATION
             -----------------------------------*/
             if (user.role !== "superadmin") {
-            throw Forbidden("You are not allowed to create careers");
+                throw Forbidden("You are not allowed to create careers");
             }
-
-            // const schoolId = user.schoolId;
-            // if (!schoolId) throw Forbidden("School context missing");
-
-            /* ----------------------------------
-            2. EXTRACT & VALIDATE BODY
-            -----------------------------------*/
-            const {
-            title,
-            industry,
-            description,
-            progression,
-            keySkills,
-            topInstitutionsIndia,
-            globalPathways
-            } = payload.body;
-
-            if (!title) throw Forbidden("Career title is required");
-            if (!industry) throw Forbidden("Industry is required");
-            if (!description) throw Forbidden("Description is required");
-            if (!progression) throw Forbidden("Progression is required");
-            if (!Array.isArray(keySkills) || keySkills.length === 0) {
-            throw Forbidden("At least one key skill is required");
-            }
-
-            /* ----------------------------------
-            3. CREATE CAREER
-            -----------------------------------*/
-            const career = await Career.create({
-            // schoolId,
-            title,
-            industry,
-            description,
-            progression,
-            keySkills,
-            topInstitutionsIndia: topInstitutionsIndia || [],
-            globalPathways: globalPathways || [],
-            createdBy: user._id
-            });
-
-            /* ----------------------------------
-            4. RESPONSE
-            -----------------------------------*/
-            const response = career.toObject();
-
-            return {
-            status: true,
-            data: response,
-            message: "Career created successfully",
-            error: null
-            };
-
-        } catch (error) {
-            return {
-            status: false,
-            data: null,
-            message: error.message,
-            error
-            };
-        }
-    }
-
-    static async getCareer(payload) {
-        try {
-            // const { user } = payload.authData;
-
-            /* ----------------------------------
-            1. AUTH & SCHOOL CONTEXT
-            -----------------------------------*/
-            // if (!user || !user.schoolId) {
-            // throw Forbidden("School context missing");
-            // }
-
-            // const schoolId = user.schoolId;
-
-            /* ----------------------------------
-            2. EXTRACT QUERY PARAMS
-            -----------------------------------*/
-            const {
-            keyword,
-            industry,
-            page = 1,
-            limit = 50
-            } = payload.query;
-
-            const skip = (Number(page) - 1) * Number(limit);
-
-            /* ----------------------------------
-            3. BUILD QUERY
-            -----------------------------------*/
-            const query = {
-            // schoolId,
-            isDeleted: false,
-            };
-
-            // Industry filter
-            if (industry) {
-            query.industry = industry;
-            }
-            if (keyword) {
-                query.$or = [
-                    { title: { $regex: keyword, $options: "i" } },
-                    { industry: { $regex: keyword, $options: "i" } },
-                    { description: { $regex: keyword, $options: "i" } },
-                    { keySkills: { $regex: keyword, $options: "i" } }
-                ];
-            }
-            console.log("query",query)
-            /* ----------------------------------
-            4. FETCH DATA
-            -----------------------------------*/
-            const [careers, total] = await Promise.all([
-            Career.find(query)
-              .sort({ createdAt: -1 })
-              .skip(skip)
-              .limit(Number(limit)),
-
-            Career.countDocuments(query)
-            ]);
-
-            /* ----------------------------------
-            5. RESPONSE
-            -----------------------------------*/
-            return {
-            status: true,
-            data: careers,
-            message: "Careers fetched successfully",
-            error: null,
-            total,
-            currentPage: Number(page),
-            totalPages: Math.ceil(total / Number(limit)) || 1
-            };
-
-        } catch (error) {
-            return {
-            status: false,
-            data: null,
-            message: error.message,
-            error
-            };
-        }
-    }
-
-    static async updateCareer(payload) {
-        try {
-            const { user } = payload.authData;
-
-            /* ----------------------------------
-            1. AUTHORIZATION
-            -----------------------------------*/
-            if (user.role !== "superadmin") {
-                throw Forbidden("You are not allowed to update careers");
-            }
-
-            const { id } = payload.params;
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw Forbidden("Invalid career id");
-            }
-
-            const career = await Career.findOne({ _id: id, isDeleted: false });
-            if (!career) throw NotFound("Career not found");
 
             /* ----------------------------------
             2. EXTRACT & VALIDATE BODY
@@ -199,11 +42,145 @@ class CareerService {
             }
 
             /* ----------------------------------
-            3. UPDATE CAREER
+            3. RESOLVE INDUSTRY (create on demand)
             -----------------------------------*/
-            career.set({
+            const industryDoc = await CareerService.resolveIndustry(industry);
+
+            /* ----------------------------------
+            4. CREATE CAREER
+            -----------------------------------*/
+            const career = await Career.create({
+                title,
+                industry: industryDoc.name,
+                industryId: industryDoc._id,
+                description,
+                progression,
+                keySkills,
+                topInstitutionsIndia: topInstitutionsIndia || [],
+                globalPathways: globalPathways || [],
+                createdBy: user._id
+            });
+
+            return {
+                status: true,
+                data: career.toObject(),
+                message: "Career created successfully",
+                error: null
+            };
+
+        } catch (error) {
+            return { status: false, data: null, message: error.message, error };
+        }
+    }
+
+    static async getCareer(payload) {
+        try {
+            /* ----------------------------------
+            1. EXTRACT QUERY PARAMS
+            -----------------------------------*/
+            const {
+                keyword,
+                industry,
+                industryId,
+                page = 1,
+                limit = 50
+            } = payload.query;
+
+            const skip = (Number(page) - 1) * Number(limit);
+
+            /* ----------------------------------
+            2. BUILD QUERY
+            -----------------------------------*/
+            const query = { isDeleted: false };
+
+            /* Prefer the id filter — it survives industry renames */
+            if (industryId) {
+                if (!mongoose.Types.ObjectId.isValid(industryId)) {
+                    throw Forbidden("Invalid industry id");
+                }
+                query.industryId = new mongoose.Types.ObjectId(industryId);
+            } else if (industry) {
+                query.industry = industry;
+            }
+
+            if (keyword) {
+                query.$or = [
+                    { title: { $regex: keyword, $options: "i" } },
+                    { industry: { $regex: keyword, $options: "i" } },
+                    { description: { $regex: keyword, $options: "i" } },
+                    { keySkills: { $regex: keyword, $options: "i" } }
+                ];
+            }
+
+            /* ----------------------------------
+            3. FETCH DATA
+            -----------------------------------*/
+            const [careers, total] = await Promise.all([
+                Career.find(query)
+                    .populate("industryId", "name description")
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(Number(limit))
+                    .lean(),
+
+                Career.countDocuments(query)
+            ]);
+
+            return {
+                status: true,
+                data: careers,
+                message: "Careers fetched successfully",
+                error: null,
+                total,
+                currentPage: Number(page),
+                totalPages: Math.ceil(total / Number(limit)) || 1
+            };
+
+        } catch (error) {
+            return { status: false, data: null, message: error.message, error };
+        }
+    }
+
+    static async updateCareer(payload) {
+        try {
+            const { user } = payload.authData;
+
+            if (user.role !== "superadmin") {
+                throw Forbidden("You are not allowed to update careers");
+            }
+
+            const { id } = payload.params;
+            if (!mongoose.Types.ObjectId.isValid(id)) {
+                throw Forbidden("Invalid career id");
+            }
+
+            const career = await Career.findOne({ _id: id, isDeleted: false });
+            if (!career) throw NotFound("Career not found");
+
+            const {
                 title,
                 industry,
+                description,
+                progression,
+                keySkills,
+                topInstitutionsIndia,
+                globalPathways
+            } = payload.body;
+
+            if (!title) throw Forbidden("Career title is required");
+            if (!industry) throw Forbidden("Industry is required");
+            if (!description) throw Forbidden("Description is required");
+            if (!progression) throw Forbidden("Progression is required");
+            if (!Array.isArray(keySkills) || keySkills.length === 0) {
+                throw Forbidden("At least one key skill is required");
+            }
+
+            const industryDoc = await CareerService.resolveIndustry(industry);
+
+            career.set({
+                title,
+                industry: industryDoc.name,
+                industryId: industryDoc._id,
                 description,
                 progression,
                 keySkills,
@@ -222,12 +199,7 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
@@ -260,25 +232,31 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
     /* ==========================================
        INDUSTRIES
-       Careers store `industry` as a plain string,
-       so the Industry collection is kept in sync
-       with whatever names careers already use.
+       Careers carry both `industryId` (the link)
+       and `industry` (denormalised name, kept in
+       sync so older clients keep working).
     ==========================================*/
 
-    static async getIndustries() {
-        try {
+    /** Find an industry by name, creating it if it does not exist yet. */
+    static async resolveIndustry(name) {
+        const clean = String(name || "").trim();
+        if (!clean) throw Forbidden("Industry is required");
 
+        return Industry.findOneAndUpdate(
+            { name: { $regex: `^${escapeRegex(clean)}$`, $options: "i" } },
+            { $setOnInsert: { name: clean } },
+            { new: true, upsert: true }
+        );
+    }
+
+    static async getIndustries(payload) {
+        try {
             /* ----------------------------------
             1. BACKFILL: any industry used by a career
                but missing from the collection
@@ -303,19 +281,30 @@ class CareerService {
             -----------------------------------*/
             const industries = await Industry.find({}).sort({ name: 1 }).lean();
 
-            const counts = await Career.aggregate([
-                { $match: { isDeleted: false } },
-                { $group: { _id: "$industry", count: { $sum: 1 } } }
+            const [byId, byName] = await Promise.all([
+                Career.aggregate([
+                    { $match: { isDeleted: false, industryId: { $ne: null } } },
+                    { $group: { _id: "$industryId", count: { $sum: 1 } } }
+                ]),
+                Career.aggregate([
+                    { $match: { isDeleted: false, industryId: null } },
+                    { $group: { _id: "$industry", count: { $sum: 1 } } }
+                ])
             ]);
 
-            const countByName = counts.reduce((acc, c) => {
+            const countById = byId.reduce((acc, c) => {
+                acc[String(c._id)] = c.count;
+                return acc;
+            }, {});
+            const countByName = byName.reduce((acc, c) => {
                 acc[c._id] = c.count;
                 return acc;
             }, {});
 
             const data = industries.map((i) => ({
                 ...i,
-                careerCount: countByName[i.name] || 0
+                /* legacy careers not yet linked by id still get counted */
+                careerCount: (countById[String(i._id)] || 0) + (countByName[i.name] || 0)
             }));
 
             return {
@@ -326,12 +315,7 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
@@ -363,12 +347,7 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
@@ -405,11 +384,11 @@ class CareerService {
             }
             await industry.save();
 
-            /* Careers reference the industry by name — keep them in sync */
+            /* Careers denormalise the industry name — keep them in sync */
             if (previousName !== name) {
                 await Career.updateMany(
-                    { industry: previousName },
-                    { industry: name, updatedBy: user._id }
+                    { $or: [{ industryId: industry._id }, { industry: previousName }] },
+                    { industry: name, industryId: industry._id, updatedBy: user._id }
                 );
             }
 
@@ -421,12 +400,7 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
@@ -447,7 +421,7 @@ class CareerService {
             if (!industry) throw NotFound("Industry not found");
 
             const inUse = await Career.countDocuments({
-                industry: industry.name,
+                $or: [{ industryId: industry._id }, { industry: industry.name }],
                 isDeleted: false
             });
 
@@ -467,19 +441,10 @@ class CareerService {
             };
 
         } catch (error) {
-            return {
-                status: false,
-                data: null,
-                message: error.message,
-                error
-            };
+            return { status: false, data: null, message: error.message, error };
         }
     }
 
-}
-
-function escapeRegex(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 module.exports = CareerService;
