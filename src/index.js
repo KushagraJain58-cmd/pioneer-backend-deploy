@@ -37,6 +37,7 @@ const blogRoutes = require("../src/routes/blog.route")
 const auditLogRoutes = require("../src/routes/auditLog.route")
 const studentExperienceRoutes = require("../src/routes/studentExperience.route")
 const studentShortlistRoutes = require("../src/routes/studentShortlist.route")
+const counsellorRoutes = require("../src/routes/counsellor.route")
 
 app.get("/", (req, res) => res.status(200).json({
     status: true,
@@ -59,6 +60,7 @@ app.use("/api/studentBlog", blogRoutes);
 app.use("/api/auditLog",auditLogRoutes);
 app.use("/api/student-experience", studentExperienceRoutes);
 app.use("/api/student-shortlist", studentShortlistRoutes);
+app.use("/api/counsellors", counsellorRoutes);
 // catch 404 and forward to error handler
 app.use((req, res, next) => {
     next(createError(404));
