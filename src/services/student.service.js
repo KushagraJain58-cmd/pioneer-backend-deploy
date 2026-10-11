@@ -12,6 +12,31 @@ const generatePassword = require("../utils/generatePassword");
 const bcrypt = require("bcrypt");
 const xlsx = require("xlsx");
 const StudentAcademicRecord = require("../models/studentAcademic.model")
+const generateSchoolCode = require("../utils/generateSchoolCode");
+
+// Student ID prefix from the school's name, e.g. "St. Marks" -> "SM"
+function getStudentIdPrefix(school) {
+  return generateSchoolCode(school?.name) || school?.schoolCode || "SCH";
+}
+
+function buildStudentId(prefix, classGrade, year, roll) {
+  return `${prefix}-${String(classGrade).trim()}-${year}-${String(roll).trim()}`;
+}
+
+// Next auto roll number for a class whose Student ID is not already taken
+async function nextFreeRoll(schoolId, prefix, classGrade, year, reserved = new Set()) {
+  while (true) {
+    const counter = await StudentCounter.findOneAndUpdate(
+      { schoolId, classGrade: String(classGrade).trim(), year },
+      { $inc: { sequence: 1 } },
+      { new: true, upsert: true }
+    );
+    const roll = String(counter.sequence).padStart(3, "0");
+    const studentId = buildStudentId(prefix, classGrade, year, roll);
+    if (reserved.has(studentId)) continue;
+    if (!(await Student.exists({ studentId }))) return roll;
+  }
+}
 
 const FIXED_COLUMNS = [
   "Student ID",
@@ -308,20 +333,23 @@ class StudentService {
       -----------------------------------*/
       const year = new Date().getFullYear();
 
-      const counter = await StudentCounter.findOneAndUpdate(
-        {
-          schoolId,
-          classGrade: academicInfo.classGrade,
-          year
-        },
-        { $inc: { sequence: 1 } },
-        { new: true, upsert: true }
-      );
+      const school = await School.findById(schoolId);
+      if (!school) throw Forbidden("School not found");
+      const prefix = getStudentIdPrefix(school);
 
-      const schoolCode = user.schoolCode || "SCH"; // store in School later
-      const sequence = String(counter.sequence).padStart(4, "0");
+      let roll = academicInfo.rollNumber ? String(academicInfo.rollNumber).trim() : "";
+      if (roll) {
+        const taken = await Student.exists({
+          studentId: buildStudentId(prefix, academicInfo.classGrade, year, roll)
+        });
+        if (taken) {
+          throw Forbidden(`Roll number ${roll} is already used in class ${academicInfo.classGrade}`);
+        }
+      } else {
+        roll = await nextFreeRoll(schoolId, prefix, academicInfo.classGrade, year);
+      }
 
-      const studentId = `${schoolCode}-${academicInfo.classGrade}-${year}-${sequence}`;
+      const studentId = buildStudentId(prefix, academicInfo.classGrade, year, roll);
 
       /* ----------------------------------
       2. GENERATE PASSWORD
@@ -339,7 +367,7 @@ class StudentService {
         studentPassword: encryptedPassword,
         portalAccess: normalizedPortalAccess,
         personalInfo,
-        academicInfo,
+        academicInfo: { ...academicInfo, rollNumber: roll },
         addressInfo,
         contactInfo,
         familyInfo,
@@ -424,16 +452,34 @@ class StudentService {
       // unless a row overrides it with a "Portal Access" column.
       const batchPortalAccess = normalizePortalAccess(req.body?.portalAccess);
 
-      let index = 1;
+      const prefix = getStudentIdPrefix(school);
+      const year = new Date().getFullYear();
+      const validRows = rows.filter((row) => row["Full Name"] && row["Class"]);
 
-      for (const row of rows) {
-        if (!row["Full Name"] || !row["Class"]) continue;
+      // Check roll numbers given in the sheet against each other and the DB
+      const reserved = new Set();
+      const duplicates = [];
+      for (const row of validRows) {
+        if (row["Roll Number"] == null || String(row["Roll Number"]).trim() === "") continue;
+        const id = buildStudentId(prefix, row["Class"], year, row["Roll Number"]);
+        if (reserved.has(id)) duplicates.push(`${id} (repeated in sheet)`);
+        reserved.add(id);
+      }
+      const existing = await Student.find({ studentId: { $in: [...reserved] } }, { studentId: 1 }).lean();
+      existing.forEach((s) => duplicates.push(`${s.studentId} (already exists)`));
+      if (duplicates.length) {
+        throw Forbidden(`Duplicate class/roll numbers: ${duplicates.join(", ")}`);
+      }
 
+      for (const row of validRows) {
         const plainPassword = generatePassword(8);
         const encryptedPassword = EncryptAndDecrypt.encrypt(plainPassword);
 
-        const roll = row["Roll Number"] || String(index).padStart(3, "0");
-        const year = new Date().getFullYear();
+        let roll = row["Roll Number"] == null ? "" : String(row["Roll Number"]).trim();
+        if (!roll) {
+          roll = await nextFreeRoll(schoolId, prefix, row["Class"], year, reserved);
+          reserved.add(buildStudentId(prefix, row["Class"], year, roll));
+        }
 
         // const counter = await StudentCounter.findOneAndUpdate(
         //   {
@@ -450,7 +496,7 @@ class StudentService {
 
         // const studentId = `${schoolCode}-${academicInfo.classGrade}-${year}-${sequence}`;
         
-        const studentId = `${school.schoolCode}-${row["Class"]}-${year}-${roll}`;
+        const studentId = buildStudentId(prefix, row["Class"], year, roll);
 
         studentsToInsert.push({
           studentId,
@@ -501,7 +547,6 @@ class StudentService {
           password: plainPassword
         });
 
-        index++;
       }
 
       if (!studentsToInsert.length) {
